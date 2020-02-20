@@ -47,44 +47,51 @@ var (
 // Used in place of minio's verbose "NoSuchKey" error.
 var errNotFound = errors.New("NOT FOUND")
 
-// New returns a new instance of the S3-API based cache
-func New(s3Config *config.S3CloudStorageConfig, accessLogger cache.Logger,
-	errorLogger cache.Logger) cache.CacheProxy {
+func newMinioCore(s3Config *config.S3CloudStorageConfig, accessLogger cache.Logger,
+	errorLogger cache.Logger) (*minio.Core, error) {
 
-	fmt.Println("Using S3 backend.")
-
-	var minioCore *minio.Core
-	var err error
-
-	if s3Config.IAMRoleEndpoint != "" {
-		// Initialize minio client object with IAM credentials
-		creds := credentials.NewIAM(s3Config.IAMRoleEndpoint)
-		minioClient, err := minio.NewWithCredentials(
-			s3Config.Endpoint,
-			creds,
-			!s3Config.DisableSSL,
-			s3Config.Region,
-		)
-
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		minioCore = &minio.Core{
-			Client: minioClient,
-		}
-	} else {
+	if s3Config.AccessKeyID != "" {
 		// Initialize minio client object.
-		minioCore, err = minio.NewCore(
+		return minio.NewCore(
 			s3Config.Endpoint,
 			s3Config.AccessKeyID,
 			s3Config.SecretAccessKey,
 			!s3Config.DisableSSL,
 		)
 
-		if err != nil {
-			log.Fatalln(err)
-		}
+	}
+
+	// Initialize minio client object with IAM credentials
+	creds := credentials.NewIAM(s3Config.IAMRoleEndpoint)
+	if _, err := creds.Get(); err != nil {
+		return nil, err
+	}
+
+	minioClient, err := minio.NewWithCredentials(
+		s3Config.Endpoint,
+		creds,
+		!s3Config.DisableSSL,
+		s3Config.Region,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &minio.Core{
+		Client: minioClient,
+	}, nil
+}
+
+// New returns a new instance of the S3-API based cache
+func New(s3Config *config.S3CloudStorageConfig, accessLogger cache.Logger,
+	errorLogger cache.Logger) cache.CacheProxy {
+
+	fmt.Println("Using S3 backend.")
+
+	minioCore, err := newMinioCore(s3Config, accessLogger, errorLogger)
+	if err != nil {
+		log.Fatalln(err)
 	}
 
 	uploadQueue := make(chan uploadReq, maxQueuedUploads)
